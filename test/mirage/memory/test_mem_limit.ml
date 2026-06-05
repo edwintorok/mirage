@@ -35,6 +35,25 @@ let allocator_test amount_of_kib alloc_amount ignore_allocated =
   ]
 
 let shifts = List.init 4 Fun.id
+let packet_size = 1514
+let cache = Stack.create ()
+
+let on_low_memory () =
+  let drop = Stack.length cache / 4 in
+  for _ = 1 to drop do
+    Stack.pop cache |> ignore
+  done
+
+let rec process_packets count =
+  if count > 0 then begin
+    let packet = alloc_custom_bytes (Bytes packet_size) in
+    if count mod 100000 = 0 then
+      Format.printf "process_packets remaining %d@." count;
+    let count = count - 1 in
+    if check_room_for_bytes packet_size then Stack.push packet cache
+    else Format.printf "DROP@.";
+    (process_packets [@tailcall]) count
+  end
 
 let tests =
   [
@@ -75,6 +94,21 @@ let tests =
          let actual = Private.try_alloc_bytes bytes in
          let expected = try_alloc_custom_bytes bytes in
          check' bool ~msg:"consistent" ~expected ~actual );
+    ( "check_room_for_bytes",
+      [
+        (let count = 20 in
+         gc_test_case (string_of_int count) @@ fun limit_kib ->
+         let (Bytes bytes) = limit_kib |> bytes_of_kib in
+         let bytes = bytes * count in
+         (* attempt to allocate 10 * the memory limit
+         drop allocations where [check_room_for_bytes]
+         returns false
+       *)
+         let count = bytes / packet_size in
+         register_on_low_memory on_low_memory;
+         Format.printf "Simulating %d packets = %d bytes@." count bytes;
+         process_packets count);
+      ] );
   ]
 
 let () = run_with_args "test_mem_limit" ulimit_v_kib tests
