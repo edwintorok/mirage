@@ -13,4 +13,7 @@
 (library
  (name mirage_runtime_memory)
  (public_name mirage-runtime.memory)
+ (foreign_stubs
+  (language c)
+  (names memory_stubs))
  (modules mirage_runtime_memory))

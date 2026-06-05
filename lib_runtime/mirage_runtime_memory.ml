@@ -1,4 +1,6 @@
 module Private = struct
+  external try_alloc_bytes : int -> bool = "stub_try_alloc" [@@noalloc]
+
   let[@inline] round_up n ~multiple_of =
     (n + multiple_of - 1) / multiple_of * multiple_of
 

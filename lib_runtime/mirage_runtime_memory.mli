@@ -1,6 +1,22 @@
 (**/**)
 
 module Private : sig
+  val try_alloc_bytes : int -> bool
+  (** [try_alloc_bytes bytes] allocates and immediately frees [bytes]. Does not
+      raise exceptions on out of memory.
+
+      If this succeeds, then it is likely that future OCaml or custom value
+      ({!module:Bigarray}) allocations less than [bytes] would also succeed.
+
+      A failure is not a guarantee that future allocations would fail (e.g.
+      [malloc] may have some cached mappings it can use instead of calling
+      [mmap]).
+
+      @return [true] if the allocation test succeeded, [false] otherwise
+      @raise [Unix_error]
+        if memory allocation failed for a reason other than [ENOMEM], or if
+        memory deallocation failed *)
+
   val increment_of_heap : Gc.control -> int -> int
   (** [increment_of_heap ctrl words] is the minimum size in words that
       [heap_words] will grow by when allocating [words] in total. Calls
