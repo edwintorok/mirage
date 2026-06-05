@@ -9,3 +9,4 @@ _tests/
 .merlin
 _opam
 .DS_Store
+compile_commands.json
