@@ -49,4 +49,38 @@ module Private = struct
     let request = words + (words / 100 * overhead)
     and request' = words + (words / 100 * overhead') in
     Int.max request (increment_of_heap ctrl request') |> round_up_page_size
+
+  let bytes_of_words w = w * Sys.word_size / 8
+
+  let[@inline] minor_heap_needed_bytes () =
+    let ctrl = Gc.get () in
+    major_heap_increment_words ctrl |> bytes_of_words
+
+  let[@inline] has_room_for_bytes bytes =
+    (* TODO: if you are using a multiple domains, also multiply *)
+    bytes + (2 * minor_heap_needed_bytes ()) |> try_alloc_bytes
 end
+
+let on_low_memory = ref []
+let register_on_low_memory f = on_low_memory := f :: !on_low_memory
+let call_low_memory f = f ()
+
+let check_room_for_bytes bytes =
+  if Private.has_room_for_bytes bytes then true
+  else begin
+    Gc.full_major ();
+
+    (* if custom memory (e.g. bigarrays) got allocated then
+       we may run out of room, even if a previous call to [check_..] was OK.
+       Try compacting as a last resort, if we don't have enough room for the minor heap either.
+       Also according to the manual 2 calls might be needed anyway if ephemerons
+       are used (this is the 2nd).
+    *)
+    if not @@ Private.has_room_for_bytes 0 then Gc.compact ();
+
+    (* call the low memory callbacks, it is safer to do this
+       after we attempted to free some memory already *)
+    List.iter call_low_memory !on_low_memory;
+
+    false
+  end
