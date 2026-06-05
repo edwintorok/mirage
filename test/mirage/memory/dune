@@ -6,9 +6,9 @@
 
 (test
  (name test_mem_grow)
- (modules test_mem_grow test_common)
+ (modules test_mem_grow)
  (package mirage-runtime)
- (libraries mirage-runtime.memory alcotest))
+ (libraries mirage-runtime.memory alcotest test_common))
 
 (test
  (name test_mem_limit)

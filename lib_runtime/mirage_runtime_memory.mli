@@ -1,6 +1,16 @@
 (**/**)
 
 module Private : sig
+  val try_alloc_bytes : int -> bool
+  (** [try_alloc_bytes bytes] checks whether [bytes] memory are available using
+      the C [malloc(3)] function. This function doesn't raise exceptions, and
+      immediately frees any memory allocated. We cannot use
+      [Bigarray.Array1.create], because that wouldn't free memory immediately,
+      and we'd risk using up all available memory and crashing on the next minor
+      heap collection with a fatal error.
+
+      @return [true] if the allocation succeeded, [false] otherwise *)
+
   val increment_of_heap : Gc.control -> int -> int
   (** [increment_of_heap ctrl words] is the minimum size in words that
       [heap_words] will grow by when allocating [words] in total. Calls
