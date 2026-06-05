@@ -42,7 +42,8 @@ val alloc_custom_bytes : bytes -> custom_heap
     is larger than [bytes]. *)
 
 val alloc_words : words -> ocaml_heap
-(** [alloc_words words] allocates [words] on the OCaml heap. *)
+(** [alloc_words words] allocates [words] on the OCaml heap. [words] cannot be
+    [1], and must be [>= 0]. *)
 
 val ignore_custom : custom_heap -> unit
 (** [ignore_custom custom] is a convenience function for ignoring a
@@ -57,3 +58,9 @@ val ignore_ocaml : ocaml_heap -> unit
 val gc_test_case : string -> ('a -> unit) -> 'a Alcotest.V1.test_case
 (** [gc_test_case name f] is the testcase [f] with [name]. It runs the garbage
     collector to compact the heap before each test. *)
+
+val gc_heap_words : unit -> words
+(** [gc_heap_words ()] is the size of the OCaml major heap in words *)
+
+val with_alive : 'a -> (unit -> 'b) -> 'b
+(** [with_alive data f] calls [f], keeping [data] alive across the call. *)

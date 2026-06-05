@@ -20,13 +20,16 @@ let alloc_custom_bytes (Bytes bytes) =
   Bigarray.(Array1.create char c_layout bytes)
 
 let alloc_words (Words words) =
-  (* [Array.make 0 0] would return the
+  if words = 0 then [||]
+  else begin
+    (* [Array.make 0 0] would return the
      empty array without allocating.
      So we cannot allocate exactly 1 word.
    *)
-  assert (words > 1);
-  (* the GC header uses 1 word *)
-  Array.make (words - 1) 0
+    assert (words > 1);
+    (* the GC header uses 1 word *)
+    Array.make (words - 1) 0
+  end
 
 let ignore_custom (ba : _ Bigarray.Array1.t) =
   ba |> Sys.opaque_identity |> ignore
@@ -47,3 +50,15 @@ let gc_test_case name f =
   test_case name `Quick @@ fun arg ->
   reset ();
   f arg
+
+let gc_heap_words () =
+  (* must run either a minor or major cycle,
+     otherwise the stats would be out-of-date (even [heap_words])
+   *)
+  Gc.minor ();
+  Words Gc.(quick_stat ()).heap_words
+
+let with_alive data f =
+  let r = f () |> Sys.opaque_identity in
+  let _keep = Sys.opaque_identity data in
+  r
