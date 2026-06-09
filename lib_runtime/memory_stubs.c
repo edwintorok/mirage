@@ -23,3 +23,24 @@ CAMLprim value stub_try_alloc(value val_bytes) {
     uerror("munmap", Nothing);
   return Val_true;
 }
+
+#ifdef __GLIBC__
+#include <malloc.h>
+#else
+
+static int malloc_trim(size_t pad) { return 0; }
+
+#endif
+
+CAMLprim value stub_malloc_trim(intnat amount) {
+  /* The OCaml runtime uses both malloc() and mmap().
+     If malloc keep pages allocated, then it might be unavailable to mmap.
+     When we are low on memory tell the allocator to give back the pages
+     (according to malloc_trim(3) since Glibc 2.8 this'll also free whole pages
+      anywhere, not just at the end).
+     This has no effect when custom allocators (jemalloc, mimalloc) are linked,
+     because the this call is not intercepted and the call will be made to
+     glibc's allocator.
+   */
+  return Val_bool(malloc_trim(Long_val(amount)));
+}

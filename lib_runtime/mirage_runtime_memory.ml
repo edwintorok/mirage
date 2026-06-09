@@ -1,4 +1,5 @@
 module Private = struct
+  external malloc_trim : nativeint -> bool = "stub_malloc_trim" [@@noalloc]
   external try_alloc_bytes : int -> bool = "stub_try_alloc" [@@noalloc]
 
   let[@inline] round_up n ~multiple_of =
@@ -66,6 +67,7 @@ let register_on_low_memory f = on_low_memory := f :: !on_low_memory
 let call_low_memory f = f ()
 
 let low_memory_cleanup () =
+  let (_ : bool) = Private.malloc_trim 0n in
   Gc.full_major ();
 
   (* if custom values (e.g. bigarrays) got allocated then
