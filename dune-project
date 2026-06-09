@@ -1,3 +1,3 @@
-(lang dune 2.9)
+(lang dune 3.15)
 (name mirage)
 (cram enable)
