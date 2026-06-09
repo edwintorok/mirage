@@ -7,6 +7,10 @@ val register_on_low_memory : (unit -> unit) -> unit
     functions should not raise any exceptions, if they do, then
     [check_room_for_bytes] will reraise the exception. *)
 
+val low_memory_cleanup : unit -> unit
+(** [low_memory_cleanup ()] calls [malloc_trim] if available, runs the garbage
+    collector, and the registered on_low_memory handlers. *)
+
 val check_room_for_bytes : int -> bool
 (** [check_room_for_bytes bytes] checks whether there is enough room for [bytes]
     plus minor heap promotion. If there isn't enough room then {!Gc.full_major},
