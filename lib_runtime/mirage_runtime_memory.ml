@@ -1,4 +1,5 @@
 module Private = struct
+  external malloc_trim : nativeint -> bool = "stub_malloc_trim" [@@noalloc]
   external try_alloc_bytes : int -> bool = "stub_try_alloc" [@@noalloc]
 
   let[@inline] round_up n ~multiple_of =
@@ -65,22 +66,25 @@ let on_low_memory = ref []
 let register_on_low_memory f = on_low_memory := f :: !on_low_memory
 let call_low_memory f = f ()
 
-let check_room_for_bytes bytes =
-  if Private.has_room_for_bytes bytes then true
-  else begin
-    Gc.full_major ();
+let low_memory_cleanup () =
+  Private.malloc_trim 0n |> ignore;
+  Gc.full_major ();
 
-    (* if custom memory (e.g. bigarrays) got allocated then
+  (* if custom memory (e.g. bigarrays) got allocated then
        we may run out of room, even if a previous call to [check_..] was OK.
        Try compacting as a last resort, if we don't have enough room for the minor heap either.
        Also according to the manual 2 calls might be needed anyway if ephemerons
        are used (this is the 2nd).
     *)
-    if not @@ Private.has_room_for_bytes 0 then Gc.compact ();
+  if not @@ Private.has_room_for_bytes 0 then Gc.compact ();
 
-    (* call the low memory callbacks, it is safer to do this
+  (* call the low memory callbacks, it is safer to do this
        after we attempted to free some memory already *)
-    List.iter call_low_memory !on_low_memory;
+  List.iter call_low_memory !on_low_memory
 
+let check_room_for_bytes bytes =
+  if Private.has_room_for_bytes bytes then true
+  else begin
+    low_memory_cleanup ();
     false
   end

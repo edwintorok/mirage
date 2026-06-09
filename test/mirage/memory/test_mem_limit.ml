@@ -46,13 +46,18 @@ let on_low_memory () =
 
 let rec process_packets count =
   if count > 0 then begin
-    let packet = alloc_custom_bytes (Bytes packet_size) in
-    if count mod 100000 = 0 then
-      Format.printf "process_packets remaining %d@." count;
     let count = count - 1 in
-    if check_room_for_bytes packet_size then Stack.push packet cache
-    else Format.printf "DROP@.";
-    (process_packets [@tailcall]) count
+    match alloc_custom_bytes (Bytes packet_size) with
+    | exception Out_of_memory ->
+        low_memory_cleanup ();
+        Format.printf "OOM@.";
+        (process_packets [@tailcall]) count
+    | packet ->
+        if count mod 100000 = 0 then
+          Format.printf "process_packets remaining %d@." count;
+        if check_room_for_bytes packet_size then Stack.push packet cache
+        else Format.printf "DROP@.";
+        (process_packets [@tailcall]) count
   end
 
 let tests =
