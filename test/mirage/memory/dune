@@ -1,0 +1,38 @@
+(library
+ (name test_common)
+ (modules test_common)
+ (package mirage-runtime)
+ (libraries alcotest))
+
+(test
+ (name test_mem_limit)
+ (modules test_mem_limit)
+ (package mirage-runtime)
+ ; ulimit -v support is OS specific:
+ ;  works on:
+ ;   Linux (regardless of overcommit kernel setting)
+ ;   FreeBSD (with the MALLOC_CONF tweak below)
+ ;  doesn't work on:
+ ;    OpenBSD (https://man.openbsd.org/getrlimit.2#BUGS)
+ ;    macOS (EINVAL, except on very large values)
+ (enabled_if
+  (or
+   (= %{ocaml-config:system} linux)
+   (= %{ocaml-config:system} freebsd)))
+ (libraries mirage-runtime.memory alcotest test_common)
+ ; no %{test} in a `run` action: dependency required
+ (deps test_mem_limit.exe)
+ (action
+  (setenv
+   LIMIT_KIB
+   393216
+   (setenv
+    MALLOC_CONF
+    retain:false
+    ; FreeBSD jemalloc sets retain:true, which not compatible with ulimit:
+    ; https://github.com/jemalloc/jemalloc/issues/1668
+    (setenv
+     OCAMLRUNPARAM
+     d=1 ; by default it'd ENOMEM when allocating 128 minor heaps
+     (bash ; ulimit is a shell builtin, use bash which is known to support -v
+      "ulimit -v ${LIMIT_KIB} && ulimit -a && ./test_mem_limit.exe --ulimit ${LIMIT_KIB} -e -v"))))))
