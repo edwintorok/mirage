@@ -9,4 +9,8 @@ module Private : sig
       is retained (in case the increment is reintroduced). Note that if [words]
       is allocated in multiple allocation calls (e.g. a list), then the heap may
       grow multiple times. *)
+
+  val major_heap_increment_words : Gc.control -> int
+  (** [major_heap_increment_words ctrl] is the amount of words a full major heap
+      will grow when running the minor GC on a full minor heap. *)
 end
