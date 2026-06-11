@@ -33,4 +33,18 @@ module Private = struct
         (* increments > 1000 are fixed number of words *)
         assert (words > 0);
         round_up requested_words ~multiple_of:(round_up_page_size words)
+
+  let[@inline] major_heap_increment_words ctrl =
+    let words = ctrl.Gc.minor_heap_size in
+    let overhead =
+      (* on OCaml 5.x there is at most 11% overhead, see gen_sizeclasses.ml *)
+      11
+    in
+    let overhead' =
+      (* measured with the unit test on 4.14.3 *)
+      18
+    in
+    let request = words + (words / 100 * overhead)
+    and request' = words + (words / 100 * overhead') in
+    Int.max request (increment_of_heap ctrl request') |> round_up_page_size
 end

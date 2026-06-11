@@ -64,3 +64,10 @@ val gc_heap_words : unit -> words
 
 val with_alive : 'a -> (unit -> 'b) -> 'b
 (** [with_alive data f] calls [f], keeping [data] alive across the call. *)
+
+val minimize_free_words : unit -> ocaml_heap list
+(** [minimize_free_words ()] reduces [free_words] in the heap, without
+    increasing the heap size.
+
+    This is useful for testing heap size increments (so that we know all
+    allocations goes into increasing it) *)

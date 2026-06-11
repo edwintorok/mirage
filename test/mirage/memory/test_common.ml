@@ -62,3 +62,38 @@ let with_alive data f =
   let r = f () |> Sys.opaque_identity in
   let _keep = Sys.opaque_identity data in
   r
+
+let full_major_stat () =
+  Gc.full_major ();
+  if Sys.ocaml_release.major < 5 then Gc.stat () else Gc.quick_stat ()
+
+let list_element_size = 3
+
+let rec minimize_free_words ctrl acc (Words last_heap_words) =
+  let stat = full_major_stat () in
+  let words =
+    (100 * stat.largest_free / (100 + ctrl.Gc.space_overhead))
+    - list_element_size
+  in
+  Format.printf "heap_words=%d->%d, free_words=%d, largest_free=%d@."
+    last_heap_words stat.heap_words stat.free_words stat.largest_free;
+  let stop_threshold = 32 in
+  if stat.heap_words <> last_heap_words then
+    failwith
+      (Printf.sprintf
+         "free_words didn't stabilize, adjust stopping threshold (currently \
+          %d)!"
+         stop_threshold);
+  if words <= stop_threshold then acc
+  else begin
+    Format.printf "alloc_words(%d)@." words;
+    let data = alloc_words (Words words) in
+    let acc = data :: acc in
+    (minimize_free_words [@tailcall]) ctrl acc (Words stat.heap_words)
+  end
+
+let minimize_free_words () =
+  if Sys.ocaml_release.major >= 5 then
+    (* OCaml 5.x allocates directly, not in increments *)
+    []
+  else minimize_free_words (Gc.get ()) [] (gc_heap_words ())

@@ -45,6 +45,30 @@ let rec grow_once heap_words acc =
   else (heap_words, heap_words')
 
 let grow_once () = grow_once (gc_heap_words ()) []
+let limit = KiB (1 lsl 20) |> words_of_kib
+
+(* this grows the heap more quickly by allocating arrays instead of lists *)
+let rec grow_multiple count acc heap_words =
+  if count <= 0 then Sys.opaque_identity acc
+  else
+    let acc = alloc_words (Words ctrl.minor_heap_size) :: acc in
+    let heap_words' = gc_heap_words () in
+    if heap_words' >= limit then (Alcotest.V1.skip [@tailcall]) ()
+    else
+      let count =
+        if heap_words = heap_words' then count
+        else begin
+          let (Words heap_words) = heap_words
+          and (Words heap_words') = heap_words' in
+          Format.printf "heap_words=%d -> %d@." heap_words heap_words';
+          count - 1
+        end
+      in
+      (grow_multiple [@tailcall]) count acc heap_words
+
+let with_grow_multiple count f =
+  let data = grow_multiple count [] (gc_heap_words ()) in
+  with_alive data f
 
 let tests =
   [
@@ -66,6 +90,71 @@ let tests =
             Format.printf "%d + %d = %d@." heap_words expected heap_words';
             check' int ~msg:"increment_of_heap" ~expected ~actual );
       ] );
+    ( "major_heap_increment upper bound",
+      List.init 30 @@ fun count ->
+      gc_test_case (string_of_int count) @@ fun () ->
+      with_grow_multiple count @@ fun () ->
+      Gc.compact ();
+      let (Words pre) = gc_heap_words () in
+      (* must call this *before* growing the heap,
+          because it might call [Gc.quick_stat ()] internally *)
+      let actual =
+        Private.major_heap_increment_words ctrl |> Sys.opaque_identity
+      in
+      let data = alloc_minor_heap (Words list_element_size) in
+      Format.printf "data=%d words, minor_heap_size=%d words@."
+        (Obj.reachable_words (Obj.repr data))
+        ctrl.minor_heap_size;
+      with_alive data @@ fun () ->
+      Gc.full_major ();
+      let (Words post) = gc_heap_words () in
+      let expected = post - pre in
+      Format.printf "heap_words:%d + %d = %d, increment=%f%%@." pre expected
+        post
+        (float_of_int expected /. float_of_int pre);
+      (* we don't expect an exact match, just an upper bound in this test *)
+      if actual < expected then
+        check' int ~msg:"major_heap_increment_words lower bound" ~expected
+          ~actual );
+    ( "major_heap_increment overhead",
+      chunk_sizes
+      |> List.map @@ fun chunk_size ->
+         gc_test_case (string_of_int chunk_size) @@ fun () ->
+         if chunk_size - list_element_size = 1 then skip ()
+         else
+           let old = Gc.get () in
+           let finally () = Gc.set old in
+           Fun.protect ~finally @@ fun () ->
+           (* to measure overhead more accurately on OCaml < 5 *)
+           let ctrl = { old with major_heap_increment = 1024 } in
+           Gc.set ctrl;
+           Gc.compact ();
+           (* grow heap once *)
+           with_alive (alloc_minor_heap (Words list_element_size)) @@ fun () ->
+           let data = minimize_free_words () in
+           with_alive data @@ fun () ->
+           let (Words pre) = gc_heap_words () in
+           let actual =
+             Private.major_heap_increment_words ctrl |> Sys.opaque_identity
+           in
+           let data = alloc_minor_heap (Words chunk_size) in
+           with_alive data @@ fun () ->
+           let (Words post) = gc_heap_words () in
+           Format.printf "data: %d words@."
+             (Obj.reachable_words (Obj.repr data));
+           let expected = post - pre in
+           Format.printf "%d -> %d + %d = %d; %.1f%%@." chunk_size pre expected
+             post
+             (100.
+              *. float_of_int expected
+              /. float_of_int ctrl.minor_heap_size
+             -. 100.);
+           (* we don't expect an exact match, just an upper bound in this test
+              if this fails, then adjust overhead/overhead' in test_mem_grow.ml
+            *)
+           if actual < expected then
+             check' int ~msg:"major_heap_increment_words grow" ~expected ~actual
+    );
   ]
 
 let () = run "test_mem_grow" tests
