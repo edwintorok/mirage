@@ -2,6 +2,73 @@ module Private = struct
   external malloc_trim : nativeint -> bool = "stub_malloc_trim" [@@noalloc]
   external try_alloc_bytes : int -> bool = "stub_try_alloc" [@@noalloc]
 
+  module Reservation = struct
+    (** free and reusable words in the OCaml heap for promoting values from the
+        minor heap *)
+    let reserved_words = Atomic.make 0
+
+    let finalise reservation =
+      let (_ : int) =
+        Atomic.fetch_and_add reserved_words (Array.length reservation + 1)
+      in
+      (* these words are free in the OCaml heap, but not yet released to the OS until the next compaction.
+         it can be reused by other minor heap promotions.
+       *)
+      ()
+
+    let alloc_words words =
+      assert (words > 1);
+      let r = Array.make (words - 1) 0 in
+      Gc.finalise finalise r;
+      r
+
+    let max_young_wosize = 256
+
+    let (_ : Gc.alarm) =
+      let compactions = ref 0 in
+      Gc.create_alarm (fun () ->
+          let latest_compactions =
+            let open Gc in
+            (quick_stat ()).compactions
+          in
+          if latest_compactions > !compactions then begin
+            (* after a compaction assume that everything that was free got released,
+             so we don't have any reserved words anymore
+           *)
+            Atomic.set reserved_words 0;
+            compactions := latest_compactions
+          end)
+
+    let reserve () =
+      let minor_heap_size = Gc.(get ()).minor_heap_size in
+      let per_iteration_size = minor_heap_size / (max_young_wosize - 1) in
+      let offset =
+        (* can't allocate 0 or 1 words *)
+        2
+      in
+      let a =
+        Array.init (max_young_wosize - offset) @@ fun i ->
+        let wosize = i + offset in
+        per_iteration_size / wosize |> alloc_words
+      in
+      (* ensure they get promoted to the major heap *)
+      Gc.minor ();
+      let _alive = Sys.opaque_identity a in
+      ()
+
+    let in_reserve = Atomic.make 0
+
+    let in_reserve_finally () =
+      let (_ : int) = Atomic.fetch_and_add in_reserve (-1) in
+      ()
+
+    let reserve () =
+      (* avoid nested calls if this function is invoked from a Gc callback *)
+      let currently_in_reserve = Atomic.fetch_and_add in_reserve 1 in
+      if currently_in_reserve = 0 then
+        Fun.protect ~finally:in_reserve_finally reserve
+  end
+
   let[@inline] round_up n ~multiple_of =
     (n + multiple_of - 1) / multiple_of * multiple_of
 
