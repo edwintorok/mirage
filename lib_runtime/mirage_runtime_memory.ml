@@ -1,6 +1,6 @@
 module Private = struct
-  external malloc_trim : nativeint -> bool = "stub_malloc_trim" [@@noalloc]
-  external try_alloc_bytes : int -> bool = "stub_try_alloc" [@@noalloc]
+  external malloc_trim : nativeint -> bool = "stub_malloc_trim_noalloc" [@@noalloc]
+  external alloc_array_shr: int -> int -> unit array array = "stub_alloc_array_shr"
 
   module Reservation = struct
     (** free and reusable words in the OCaml heap for promoting values from the
