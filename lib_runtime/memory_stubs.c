@@ -56,11 +56,13 @@ CAMLprim value stub_try_alloc(value val_count, value val_size) {
   for (size_t i = 0;i < count; i++) {
       Store_field(result, i, tmp);
   }
+  /* TODO: maybe a mix of sizes from 2 to Max_young_wosize? */
 
   for (size_t i = 0;i < count; i++) {
       Store_field(result, i, caml_alloc_shr(size, 0));
   }
 
+  /* TODO: change ml return type, catch OOM? or use _noexc but that requires 5.x */
   CAMLreturn(result);
 }
 
