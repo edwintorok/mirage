@@ -1,4 +1,28 @@
 module Private = struct
+  external probe_mmap : int -> bool = "stub_probe_mmap"
+
+  let[@inline] percentage words percentage = words / 100 * percentage
+
+  let[@inline] total ctrl live_words =
+    live_words + percentage live_words ctrl.Gc.space_overhead
+
+  let[@inline] bytes_of_words w = w * Sys.word_size / 8
+
+  let needed_free_bytes ~heap_words ~custom_bytes =
+    let ctrl = Gc.get () and qstat = Gc.quick_stat () in
+    let needed_heap_size =
+      total ctrl (heap_words + qstat.live_words + ctrl.Gc.minor_heap_size)
+    and needed_custom_words =
+      percentage qstat.heap_words ctrl.custom_major_ratio
+      + percentage ctrl.Gc.minor_heap_size ctrl.Gc.custom_minor_ratio
+    in
+    let needed_heap_growth = Int.max 0 (needed_heap_size - qstat.heap_words) in
+    total ctrl custom_bytes
+    (* gc-pacing-new will apply space-overhead to custom words too *)
+    + bytes_of_words (needed_heap_growth + needed_custom_words)
+end
+(*
+
   external malloc_trim : nativeint -> bool = "stub_malloc_trim_noalloc" [@@noalloc]
   external alloc_array_shr: int -> int -> unit array array = "stub_alloc_array_shr"
 
@@ -154,4 +178,4 @@ let check_room_for_bytes bytes =
   else begin
     low_memory_cleanup ();
     false
-  end
+  end*)
