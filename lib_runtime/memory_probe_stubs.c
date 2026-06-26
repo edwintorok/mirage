@@ -1,13 +1,25 @@
 #define CAML_NAME_SPACE
-#include "caml/misc.h"
 #include "caml/mlvalues.h"
+#include "caml/unixsupport.h"
 
+#include <errno.h>
 #include <sys/mman.h>
 
-CAMLprim value stub_probe_map_noalloc_untagged(intnat bytes) {
-  if (bytes <= 0)
-    return Val_false;
-  mlsize_t len = bytes;
+CAMLprim value stub_can_alloc(value val_bytes) {
+  mlsize_t len = Long_val(val_bytes);
+
+  /* do not release the runtime lock here: that'd allow OCaml code to allocate
+     more when we might already be low on memory */
   void *ptr = mmap(NULL, len, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  return Val_bool((MAP_FAILED != ptr) && !munmap(ptr, len));
+  if (MAP_FAILED == ptr) {
+    /* do not raise on allocation failure,
+       return a boolean instead */
+    if (ENOMEM == errno)
+      return Val_false;
+    uerror("mmap", Nothing);
+  }
+
+  if (munmap(ptr, len) < 0)
+    uerror("munmap", Nothing);
+  return Val_true;
 }

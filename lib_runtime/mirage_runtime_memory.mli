@@ -1,3 +1,16 @@
+(* has_room_for_contiguous: call with *N, so we amortize tests for every N.
+   Also if heap_words didn't change.
+
+   And we test with mmap, so we know there is free contigous memory,
+   that is allocatable by either mmap or malloc.
+   If we used malloc we'd have to also keep calling malloc_trim.
+
+   Also have the actual reservation that we can release to make room
+   for compaction!
+   We'll try to reacquire it afterwards.
+   Also keep some mem reserved and free in the Gc alarm.
+*)
+
 val register_on_low_memory : (unit -> unit) -> unit
 (** [register_on_low_memory f] registers [f] to be called when we run low on
     memory, but before an {!Out_of_memory} exception is raised. [f] should try

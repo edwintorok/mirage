@@ -15,13 +15,6 @@
  (public_name mirage-runtime.memory)
  (foreign_stubs
   (language c)
-  (names memory_stubs))
+  (names memory_stubs memory_probe_stubs))
  (modules mirage_runtime_memory))
 
-(library
-  (name mirage_runtime_bigarray)
-  (public_name mirage-runtime.bigarray)
-  (foreign_stubs
-    (language c)
-    (names mirage_runtime_bigarray_stubs))
-  (modules mirage_runtime_bigarray))

@@ -1,73 +1,44 @@
+(* TODO: distinguish between emergency low memory,
+   and low memory in general (TODO: better names).
+   In one case we compact, drop caches, etc.
+   In the other case we simply limit TCP buffer sizes,
+   and rate limit new connections, etc. *)
 module Private = struct
-  external malloc_trim : nativeint -> bool = "stub_malloc_trim_noalloc" [@@noalloc]
-  external alloc_array_shr: int -> int -> unit array array = "stub_alloc_array_shr"
+  external try_alloc_bytes : int -> bool = "stub_can_alloc"
+  (** [try_alloc_bytes bytes] allocates and immediately frees [bytes]. Does not raise
+      exceptions on out of memory.
 
-  module Reservation = struct
-    (** free and reusable words in the OCaml heap for promoting values from the
-        minor heap *)
-    let reserved_words = Atomic.make 0
+      If this succeeds, then it is likely that future OCaml or custom value
+      ({!module:Bigarray}) allocations less than [bytes] would also succeed.
 
-    let finalise reservation =
-      let (_ : int) =
-        Atomic.fetch_and_add reserved_words (Array.length reservation + 1)
-      in
-      (* these words are free in the OCaml heap, but not yet released to the OS until the next compaction.
-         it can be reused by other minor heap promotions.
-       *)
-      ()
+      A failure is not a guarantee that future allocations would fail (e.g.
+      [malloc] may have some cached mappings it can use instead of calling
+      [mmap]).
 
-    let alloc_words words =
-      assert (words > 1);
-      let r = Array.make (words - 1) 0 in
-      Gc.finalise finalise r;
-      r
+      @return [true] if the allocation test succeeded, [false] otherwise
+      @raise [Unix_error]
+        if memory allocation failed for a reason other than [ENOMEM], or if
+        memory deallocation failed *)
 
-    let max_young_wosize = 256
+  (*let[@inline] percentage words percentage = words / 100 * percentage
 
-    let (_ : Gc.alarm) =
-      let compactions = ref 0 in
-      Gc.create_alarm (fun () ->
-          let latest_compactions =
-            let open Gc in
-            (quick_stat ()).compactions
-          in
-          if latest_compactions > !compactions then begin
-            (* after a compaction assume that everything that was free got released,
-             so we don't have any reserved words anymore
-           *)
-            Atomic.set reserved_words 0;
-            compactions := latest_compactions
-          end)
+  let[@inline] total ctrl live_words =
+    live_words + percentage live_words ctrl.Gc.space_overhead
 
-    let reserve () =
-      let minor_heap_size = Gc.(get ()).minor_heap_size in
-      let per_iteration_size = minor_heap_size / (max_young_wosize - 1) in
-      let offset =
-        (* can't allocate 0 or 1 words *)
-        2
-      in
-      let a =
-        Array.init (max_young_wosize - offset) @@ fun i ->
-        let wosize = i + offset in
-        per_iteration_size / wosize |> alloc_words
-      in
-      (* ensure they get promoted to the major heap *)
-      Gc.minor ();
-      let _alive = Sys.opaque_identity a in
-      ()
+  let[@inline] bytes_of_words w = w * Sys.word_size / 8
 
-    let in_reserve = Atomic.make 0
-
-    let in_reserve_finally () =
-      let (_ : int) = Atomic.fetch_and_add in_reserve (-1) in
-      ()
-
-    let reserve () =
-      (* avoid nested calls if this function is invoked from a Gc callback *)
-      let currently_in_reserve = Atomic.fetch_and_add in_reserve 1 in
-      if currently_in_reserve = 0 then
-        Fun.protect ~finally:in_reserve_finally reserve
-  end
+  let needed_free_bytes ~heap_words ~custom_bytes =
+    let ctrl = Gc.get () and qstat = Gc.quick_stat () in
+    let needed_heap_size =
+      total ctrl (heap_words + qstat.live_words + ctrl.Gc.minor_heap_size)
+    and needed_custom_words =
+      percentage qstat.heap_words ctrl.custom_major_ratio
+      + percentage ctrl.Gc.minor_heap_size ctrl.Gc.custom_minor_ratio
+    in
+    let needed_heap_growth = Int.max 0 (needed_heap_size - qstat.heap_words) in
+    total ctrl custom_bytes
+    (* gc-pacing-new will apply space-overhead to custom words too *)
+    + bytes_of_words (needed_heap_growth + needed_custom_words) *)
 
   let[@inline] round_up n ~multiple_of =
     (n + multiple_of - 1) / multiple_of * multiple_of
@@ -134,7 +105,7 @@ let register_on_low_memory f = on_low_memory := f :: !on_low_memory
 let call_low_memory f = f ()
 
 let low_memory_cleanup () =
-  Private.malloc_trim 0n |> ignore;
+  (*  Private.malloc_trim 0n |> ignore;*)
   Gc.full_major ();
 
   (* if custom memory (e.g. bigarrays) got allocated then
