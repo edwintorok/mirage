@@ -6,6 +6,8 @@
 #include <sys/mman.h>
 
 #if OCAML_VERSION < 50000
+/* backport from mlvalues.h in 5.x:
+   encode C pointers as OCaml integers to avoid 'naked pointers' */
 Caml_inline value Val_ptr(void *p) {
   CAMLassert(((value)p & 1) == 0);
   return (value)p + 1;
@@ -19,6 +21,7 @@ Caml_inline void *Ptr_val(value val) {
 
 struct reservation {
   long len;
+  char data[];
 };
 
 Caml_inline value Val_reservation(struct reservation *r) { return Val_ptr(r); }
@@ -44,6 +47,12 @@ CAMLprim value stub_reservation_map_noalloc(value val_bytes) {
   if (bytes >= sizeof(struct reservation)) {
     void *ptr =
         mmap(NULL, bytes, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+    if (MAP_FAILED != ptr) {
+        if (mprotect(ptr, sizeof(struct reservation), PROT_READ | PROT_WRITE) < 0) {
+            (void)munmap(ptr, bytes);
+            ptr = MAP_FAILED;
+        }
+    }
     /* can't raise exceptions */
     res = MAP_FAILED == ptr ? NULL : ptr;
   }
