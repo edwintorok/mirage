@@ -14,6 +14,6 @@
  (name mirage_runtime_memory)
  (public_name mirage-runtime.memory)
  (foreign_stubs
-   (language c)
-   (names stub_mirage_runtime_memory))
+  (language c)
+  (names stub_mirage_runtime_memory))
  (modules mirage_runtime_memory))
