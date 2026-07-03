@@ -12,7 +12,10 @@ module Private : sig
     val map : int -> t
     (** [map bytes] reserves [bytes] using [mmap(2)]. Does not raise exceptions,
         and doesn't allocate OCaml values. Use {!val:size_in_bytes} to check
-        whether the reservation succeeded. *)
+        whether the reservation succeeded.
+
+        This value is not managed by the OCaml GC, so you must call {!val:unmap}
+        to release it. *)
 
     val unmap : t -> bool
     (** [unmap reservation] frees memory associated with [reservation]. This is
@@ -35,4 +38,13 @@ module Private : sig
       we are low on memory
 
       @return [true] if it succeeded. *)
+
+  val check_low_memory : unit -> bool
+  (** [check_low_memory ()] checks whether enough free memory is available for
+      the next minor heap collection to complete without crashing in
+      [caml_fatal_error]. If this returns [true] the caller should attempt to
+      free some memory. If if returns [false] then an [Out_of_memory] exception
+      may still get raised later.
+
+      @return [true] when there isn't enough memory, [false] otherwise *)
 end

@@ -60,3 +60,16 @@ CAMLprim value stub_reservation_unmap_noalloc(value val_ptr) {
   /* if this is a failed mapping, then unmapping always succeeds as a no-op */
   return Val_bool(!r || !munmap(r, len_reservation(r)));
 }
+
+#ifdef __GLIBC__
+#include <malloc.h>
+#else
+
+static int malloc_trim(size_t pad) { return 0; }
+#endif
+
+CAMLprim value stub_malloc_trim_noalloc(value val_pad)
+{
+    long pad = Long_val(val_pad);
+    return Val_bool(pad >= 0 && malloc_trim(pad));
+}
