@@ -150,5 +150,44 @@ module Private = struct
 
   let check_low_memory () =
     let is_low = not @@ reserve_minor_heaps () in
-    if is_low then safe_major_and_compact ()
+    if is_low then safe_major_and_compact ();
+    is_low
+
+  let custom_counter = Atomic.make 0
+  let next_allocated_check = Atomic.make 0.
+
+  let[@inline] allocated custom_allocated_words =
+    let custom =
+      Atomic.fetch_and_add custom_counter custom_allocated_words
+      + custom_allocated_words
+      |> float_of_int
+    in
+    let _, promoted, major = Gc.counters () in
+    custom +. promoted +. major
+
+  let last_try_alloc = Atomic.make 0
+
+  let rec find_try_alloc bytes =
+    if bytes < 1 lsl 18 then 0
+    else if try_alloc bytes then bytes
+    else find_try_alloc (bytes lsr 1)
+
+  let check_low_memory_custom custom_allocated_words =
+    if allocated custom_allocated_words > Atomic.get next_allocated_check then begin
+      let is_low = check_low_memory () in
+      if is_low then begin
+        (* only use optimized path when we're not low on memory *)
+        let bytes = Atomic.get reservation |> Reservation.size_in_bytes in
+        let bytes = Int.max bytes @@ Atomic.get last_try_alloc in
+        let bytes = bytes lsl 1 in
+        let bytes = Int.min (1 lsl 30) bytes in
+        let bytes = find_try_alloc bytes in
+        Atomic.set last_try_alloc bytes;
+        (* we have room for [bytes], set next trigger to half *)
+        Atomic.set next_allocated_check
+          (allocated 0 +. float_of_int (bytes lsr 1))
+      end;
+      is_low
+    end
+    else false
 end

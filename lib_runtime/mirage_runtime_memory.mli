@@ -47,4 +47,12 @@ module Private : sig
       may still get raised later.
 
       @return [true] when there isn't enough memory, [false] otherwise *)
+
+  val check_low_memory_custom : int -> bool
+  (** [check_low_memory_custom custom_words] is like {!val:check_low_memory},
+      but optimized knowing that [custom_words] would get allocated until the
+      next call to [check_low_memory_custom].
+
+      This could be called from a Gc.Memprof callback, or at least on every
+      network packet received. *)
 end
