@@ -1,31 +1,43 @@
 module Private = struct
   module Reservation = struct
-    type t
+    module Raw = struct
+      type t
 
-    external map : int -> t = "stub_reservation_map_noalloc" [@@noalloc]
+      external map : int -> t = "stub_reservation_map_noalloc" [@@noalloc]
 
-    external size_in_bytes : t -> int = "stub_reservation_size_in_bytes_noalloc"
-    [@@noalloc]
+      external is_valid : t -> bool = "stub_reservation_is_valid_noalloc"
+      [@@noalloc]
 
-    external unmap : t -> bool = "stub_reservation_unmap_noalloc" [@@noalloc]
+      external unmap : t -> int -> bool = "stub_reservation_unmap_noalloc"
+      [@@noalloc]
+    end
 
-    let empty = map 0
+    type t = { raw : Raw.t; bytes : int }
+
+    let[@inline] size_in_bytes t = t.bytes
+    let empty = { raw = Raw.map 0; bytes = 0 }
+
+    let[@inline] map bytes =
+      let raw = Raw.map bytes in
+      if Raw.is_valid raw then { raw; bytes } else empty
+
+    let[@inline] is_valid t = Raw.is_valid t.raw
+    let[@inline] unmap t = Raw.unmap t.raw t.bytes
   end
 
-  let try_alloc bytes =
+  let[@inline] try_alloc bytes =
     let open Reservation in
-    let t = map bytes in
-    let res = size_in_bytes t > 0 in
-    res && unmap t
+    let t = Raw.map bytes in
+    Raw.is_valid t && Raw.unmap t bytes
 
   let reservation = Atomic.make Reservation.empty
 
-  let exchange_and_unmap_old t =
+  let[@inline] set_and_unmap_old t =
     Reservation.unmap (Atomic.exchange reservation t)
 
   let () =
     at_exit (fun () ->
-        let (_ : bool) = exchange_and_unmap_old Reservation.empty in
+        let (_ : bool) = set_and_unmap_old Reservation.empty in
         ())
 
   let domain_count = 1 (* TODO *)
@@ -89,11 +101,18 @@ module Private = struct
     in
     words * Sys.word_size / 8
 
+  external malloc_trim : int -> bool = "stub_malloc_trim" [@@noalloc]
+
   let reserve_minor_heaps bytes =
-    let t = Reservation.map bytes in
-    let ok = Reservation.size_in_bytes t > 0 in
-    (* only replace the reservation on a successful allocation *)
-    ok && exchange_and_unmap_old t
+    (* Allocating small OCaml values may use an [mmap] backed sizeclass pool allocator,
+       and may not be able to reuse memory that was released by [free(3)]
+       (e.g. when garbage collecting large OCaml values)
+       If libc supports it, then try to release the memory held after [free(3)].
+     *)
+    let (_ : bool) = malloc_trim 0 in
+    (* free old first, otherwise we might need double the memory when we're already low *)
+    set_and_unmap_old Reservation.empty
+    && set_and_unmap_old (Reservation.map bytes)
 
   let reserve_minor_heaps () =
     (* Do not call [Gc.quick_stat ()] here, it may trigger a minor Gc and crash 
@@ -109,47 +128,36 @@ module Private = struct
     Atomic.get reservation |> Reservation.size_in_bytes == bytes
     || reserve_minor_heaps bytes
 
-  external malloc_trim : int -> bool = "stub_malloc_trim" [@@noalloc]
-
   let safe_compact_fails = Atomic.make 0
 
   let[@inline] atomic_incr a =
     let (_ : int) = Atomic.fetch_and_add a 1 in
     ()
 
-  let[@inline never] safe_major_and_compact () =
-    (* Compaction has an implicit minor collection, which could crash
-       with [caml_fatal_error] if we are out of memory.
+  let[@inline] safe_gc_op op =
+    let (_ : bool) = set_and_unmap_old Reservation.empty in
+    (* [Gc.full_major ()] and [Gc.compact()] has an implicit minor collection,
+       which could crash with [caml_fatal_error] if we are out of memory.
        This can happen even if there'd be enough memory to free in the collection cycle.
 
        Free the reservation first to ensure the minor collection doesn't crash.
      *)
-    let (_ : bool) = exchange_and_unmap_old Reservation.empty in
+    op ();
+    reserve_minor_heaps ()
 
+  let[@inline never] safe_major_and_compact () =
     (* attempt to perform a full Gc cycle first, this should be faster than a full compaction *)
-    Gc.full_major ();
-    (* Allocating small OCaml values may use an [mmap] backed sizeclass pool allocator,
-       and may not be able to reuse memory that was released by [free(3)]
-       (e.g. when garbage collecting large OCaml values)
-       If libc supports it, then try to release the memory held after [free(3)].
-     *)
-    let (_ : bool) = malloc_trim 0 in
-    if not @@ reserve_minor_heaps () then begin
+    if not @@ safe_gc_op Gc.full_major then
       (* a GC cycle was not enough, try to compact *)
-      Gc.compact ();
-      (* compaction may have released some memory,
-         but not fully, repeat [malloc_trim(3)].
-       *)
-      let (_ : bool) = malloc_trim 0 in
-      if not @@ reserve_minor_heaps () then
+      if not @@ safe_gc_op Gc.compact then
         (* we are now running without a reservation, and may crash.
            Although the next call to [check_low_memory] will try again.
          *)
         atomic_incr safe_compact_fails
-    end
 
   let check_low_memory () =
-    let is_low = not @@ reserve_minor_heaps () in
+    let bytes = Atomic.get reservation |> Reservation.size_in_bytes in
+    let is_low = not @@ try_alloc bytes in
     if is_low then safe_major_and_compact ();
     is_low
 

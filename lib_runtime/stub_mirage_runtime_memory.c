@@ -1,73 +1,41 @@
 #define CAML_NAME_SPACE
 #include "caml/mlvalues.h"
-#include "caml/version.h"
+#include "compat.h"
 
 #include <stddef.h>
 #include <sys/mman.h>
 
-#if OCAML_VERSION < 50000
-/* backport from mlvalues.h in 5.x:
-   encode C pointers as OCaml integers to avoid 'naked pointers' */
-Caml_inline value Val_ptr(void *p) {
-  CAMLassert(((value)p & 1) == 0);
-  return (value)p + 1;
+CAMLprim value stub_reservation_is_valid_noalloc(value const val_ptr) {
+  return Val_bool(!!Ptr_val(val_ptr));
 }
 
-Caml_inline void *Ptr_val(value val) {
-  CAMLassert(val & 1);
-  return (void *)(val - 1);
-}
-#endif
+#define Val_null (Val_ptr(NULL))
 
-struct reservation {
-  long len;
-  char data[];
-};
-
-Caml_inline value Val_reservation(struct reservation *r) { return Val_ptr(r); }
-
-Caml_inline struct reservation *Reservation_val(value val) {
-  return Ptr_val(val);
-}
-
-Caml_inline long len_reservation(const struct reservation *r) {
-  return r ? r->len : -1;
-}
-
-CAMLprim value stub_reservation_size_in_bytes_noalloc(value val_ptr) {
-  return Val_long(len_reservation(Reservation_val(val_ptr)));
-}
-
-CAMLprim value stub_reservation_map_noalloc(value val_bytes) {
-  long bytes = Long_val(val_bytes);
-  struct reservation *res = NULL;
+CAMLprim value stub_reservation_map_noalloc(value const val_bytes) {
+  /* noalloc: avoid CAMLparam */
+  long const bytes = Long_val(val_bytes);
+  if (bytes <= 0)
+    return Val_null;
 
   /* noalloc only from an OCaml point of view, we do call mmap(2) */
 
-  if (bytes >= sizeof(struct reservation)) {
-    void *ptr =
-        mmap(NULL, bytes, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-    if (MAP_FAILED != ptr) {
-        if (mprotect(ptr, sizeof(struct reservation), PROT_READ | PROT_WRITE) < 0) {
-            (void)munmap(ptr, bytes);
-            ptr = MAP_FAILED;
-        }
-    }
-    /* can't raise exceptions */
-    res = MAP_FAILED == ptr ? NULL : ptr;
-  }
+  void *const ptr =
+      mmap(NULL, bytes, PROT_NONE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
+  /* storing the length would require remapping the beginning as
+     PROT_READ|PROT_WRITE, which may fail */
 
-  if (res) {
-    res->len = bytes;
-  }
-
-  return Val_reservation(res);
+  /* Can't raise exceptions.
+     MAP_FAILED is not aligned, so can't use it directly in [Val_ptr].
+     Use [Val_null] instead */
+  return MAP_FAILED == ptr ? Val_null : Val_ptr(ptr);
 }
 
-CAMLprim value stub_reservation_unmap_noalloc(value val_ptr) {
-  struct reservation *r = Reservation_val(val_ptr);
+CAMLprim value stub_reservation_unmap_noalloc(value const val_ptr,
+                                              value const val_bytes) {
+  void *const ptr = Ptr_val(val_ptr);
+  long const bytes = Long_val(val_bytes);
   /* if this is a failed mapping, then unmapping always succeeds as a no-op */
-  return Val_bool(!r || !munmap(r, len_reservation(r)));
+  return Val_bool(!ptr || (bytes > 0 && !munmap(ptr, bytes)));
 }
 
 #ifdef __GLIBC__
@@ -77,8 +45,7 @@ CAMLprim value stub_reservation_unmap_noalloc(value val_ptr) {
 static int malloc_trim(size_t pad) { return 0; }
 #endif
 
-CAMLprim value stub_malloc_trim_noalloc(value val_pad)
-{
-    long pad = Long_val(val_pad);
-    return Val_bool(pad >= 0 && malloc_trim(pad));
+CAMLprim value stub_malloc_trim_noalloc(value const val_pad) {
+  long const pad = Long_val(val_pad);
+  return Val_bool(pad >= 0 && malloc_trim(pad));
 }
